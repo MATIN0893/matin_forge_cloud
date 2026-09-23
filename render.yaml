@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: matin-forge-cloud
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: mixtral-8x7b-32768
+      - key: GROQ_ENDPOINT
+        value: https://api.groq.com/openai/v1/chat/completions
