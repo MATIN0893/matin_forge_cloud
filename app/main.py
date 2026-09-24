@@ -1,105 +1,83 @@
 import os
-import logging
-from typing import List, Optional
+import asyncio
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
 
-# ---------------------------------------------------------------------------
-# Logger configuration
-# ---------------------------------------------------------------------------
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+GROQ_KEY = os.getenv("GROQ_API_KEY")
+MODEL_NAME = "llama-3.1-8b-instant"
 
-# ---------------------------------------------------------------------------
-# Environment variables
-# ---------------------------------------------------------------------------
-TOKEN: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
-GROQ_API_KEY: Optional[str] = os.getenv("GROQ_API_KEY")
-GROQ_ENDPOINT: str = os.getenv(
-    "GROQ_ENDPOINT", "https://api.groq.com/openai/v1/chat/completions"
-)
+bot = Bot(token=TOKEN) if TOKEN else None
+dp = Dispatcher()
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-MODELS: List[str] = [
-    "llama-3.1-8b-instant",
-    "llama3-70b-8192",
-    "llama3-8b-8192",
-]
-
-# ---------------------------------------------------------------------------
-# FastAPI application
-# ---------------------------------------------------------------------------
-app = FastAPI()
-
-@app.get("/health")
-async def health_check() -> dict:
-    """Simple health endpoint used for monitoring."""
-    return {"status": "ok"}
-
-# ---------------------------------------------------------------------------
-# Groq interaction helper
-# ---------------------------------------------------------------------------
-async def ask_groq(prompt: str) -> str:
-    """Send *prompt* to Groq using a fallback list of models.
-
-    The function iterates over :data:`MODELS`. For each model it performs a
-    POST request to the Groq chat‑completion endpoint. If a model returns a
-    ``200`` response, the assistant's reply is extracted and returned.
-    When a model is unavailable (e.g., ``404`` or any request error), a log
-    entry ``"Модель {model} недоступна, пробуем следующую..."`` is emitted and
-    the next model is tried. If none of the models succeed, a user‑friendly
-    error message is returned.
-    """
-    if not GROQ_API_KEY:
-        raise RuntimeError("GROQ_API_KEY is not set in environment")
-
+async def call_groq(prompt: str) -> str:
+    if not GROQ_KEY:
+        return "⚠️ GROQ_API_KEY не задан в переменных Render!"
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Authorization": f"Bearer {GROQ_KEY}",
         "Content-Type": "application/json",
     }
+    payload = {
+        "model": MODEL_NAME,
+        "messages": [
+            {"role": "system", "content": "Ты — MATIN FORGE CLOUD, облачный ассистент и кузнец инструментов. Отвечай точно и по делу."},
+            {"role": "user", "content": prompt},
+        ],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+            return f"⚠️ Ошибка Groq ({resp.status_code}): {resp.text}"
+    except Exception as e:
+        return f"⚠️ Сетевая ошибка Groq: {e}"
 
-    for model in MODELS:
-        payload = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a helpful AI assistant that answers user "
-                        "queries concisely and accurately."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.7,
-            "max_tokens": 1024,
-        }
+@dp.message(Command("start"))
+async def start_cmd(message: types.Message):
+    await message.answer("⚒️ MATIN FORGE CLOUD на связи! Система готова к работе 24/7.")
 
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(GROQ_ENDPOINT, headers=headers, json=payload)
-        except httpx.HTTPError as exc:
-            logger.info("Model %s unavailable (%s), trying next model...", model, exc)
-            logger.info("Модель %s недоступна, пробуем следующую...", model)
-            continue
+@dp.message(Command("status"))
+async def status_cmd(message: types.Message):
+    await message.answer(
+        f"⚒️ MATIN FORGE CLOUD В СТРОЮ!\n\n"
+        f"• 🌐 Хост: Render (24/7)\n"
+        f"• 🧠 Модель: {MODEL_NAME}\n"
+        f"• ⚡ Статус: Активен"
+    )
 
-        if response.status_code == 200:
-            data = response.json()
-            choices = data.get("choices", [])
-            if choices:
-                return choices[0]["message"]["content"].strip()
-            logger.warning("Model %s returned 200 but no choices were found.", model)
-            # Fall through to try next model
-        else:
-            logger.info(
-                "Model %s returned status %s, trying next model...",
-                model,
-                response.status_code,
-            )
-            logger.info("Модель %s недоступна, пробуем следующую...", model)
-            # Continue to next model
+@dp.message()
+async def handle_message(message: types.Message):
+    if not message.text:
+        return
+    status_msg = await message.answer("⏳ Генерирую ответ...")
+    reply_text = await call_groq(message.text)
+    await status_msg.edit_text(reply_text)
 
-    return "Все модели недоступны. Пожалуйста, попробуйте позже."
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    polling_task = None
+    if bot:
+        print(">>> ЗАПУСК TELEGRAM POLLING...", flush=True)
+        polling_task = asyncio.create_task(dp.start_polling(bot))
+    yield
+    if bot:
+        await bot.session.close()
+        if polling_task:
+            polling_task.cancel()
+            try:
+                await polling_task
+            except asyncio.CancelledError:
+                pass
+
+app = FastAPI(lifespan=lifespan)
+
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "matin_forge_cloud"}
