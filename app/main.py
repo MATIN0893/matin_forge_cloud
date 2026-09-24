@@ -18,7 +18,7 @@ dp = Dispatcher()
 async def call_groq(prompt: str) -> str:
     """Send a prompt to Groq and return the assistant's reply."""
     if not GROQ_KEY:
-        return "⚠️ GROQ_API_KEY не задан в переменных Render!"
+        return "⚠️ GROQ_API_KEY не задан в переменных окружения Render!"
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_KEY}",
@@ -27,7 +27,7 @@ async def call_groq(prompt: str) -> str:
     payload = {
         "model": MODEL_NAME,
         "messages": [
-            {"role": "system", "content": "Ты — MATIN FORGE CLOUD, облачный ассистент и кузнец инструментов. Отвечай точно и по делу."},
+            {"role": "system", "content": "Ты — MATIN FORGE CLOUD, облачный ассистент и кузнец инструментов. Отвечай кратко, емко и по коду."},
             {"role": "user", "content": prompt},
         ],
     }
@@ -39,7 +39,7 @@ async def call_groq(prompt: str) -> str:
                 return data["choices"][0]["message"]["content"]
             return f"⚠️ Ошибка Groq ({resp.status_code}): {resp.text}"
     except Exception as e:
-        return f"⚠️ Сетевая ошибка Groq: {e}"
+        return f"⚠️ Ошибка подключения к Groq: {e}"
 
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
@@ -59,27 +59,28 @@ async def handle_message(message: types.Message):
     if not message.text:
         return
     status_msg = await message.answer("⏳ Генерирую ответ...")
-    reply = await call_groq(message.text)
-    await status_msg.edit_text(reply)
+    reply_text = await call_groq(message.text)
+    await status_msg.edit_text(reply_text)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     polling_task = None
     if bot:
-        print(">>> ЗАПУСК TELEGRAM POLLING...", flush=True)
+        # Run polling in background without awaiting its completion
         polling_task = asyncio.create_task(dp.start_polling(bot))
     yield
+    if polling_task:
+        polling_task.cancel()
+        try:
+            await polling_task
+        except asyncio.CancelledError:
+            pass
     if bot:
         await bot.session.close()
-        if polling_task:
-            polling_task.cancel()
-            try:
-                await polling_task
-            except asyncio.CancelledError:
-                pass
 
 app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
-async def root():
+@app.get("/health")
+async def health():
     return {"status": "ok", "service": "matin_forge_cloud"}
