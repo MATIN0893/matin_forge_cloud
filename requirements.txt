@@ -1,5 +1,7 @@
 fastapi
-pydantic
+uvicorn[standard]
+aiogram
 httpx
-uvicorn
-aiogram>=3.0.0
+python-dotenv
+# Groq SDK (optional, but required for future extensions)
+groq>=0.9.0
