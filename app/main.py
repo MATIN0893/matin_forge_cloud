@@ -41,6 +41,31 @@ async def call_groq(prompt: str) -> str:
     except Exception as e:
         return f"⚠️ Ошибка подключения к Groq: {e}"
 
+async def get_models() -> str:
+    """Fetch the list of available models from Groq's /v1/models endpoint.
+
+    Returns a formatted string with model IDs or an error message.
+    """
+    if not GROQ_KEY:
+        return "⚠️ GROQ_API_KEY не задан в переменных окружения Render!"
+    url = os.getenv(
+        "GROQ_MODELS_ENDPOINT", "https://api.groq.com/openai/v1/models"
+    )
+    headers = {"Authorization": f"Bearer {GROQ_KEY}"}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                models = data.get("data", [])
+                if not models:
+                    return "⚠️ Нет доступных моделей."
+                model_ids = [m.get("id", "unknown") for m in models]
+                return "Доступные модели:\n" + "\n".join(model_ids)
+            return f"⚠️ Ошибка получения моделей ({resp.status_code}): {resp.text}"
+    except Exception as e:
+        return f"⚠️ Ошибка подключения к Groq: {e}"
+
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
     await message.answer("⚒️ MATIN FORGE CLOUD на связи! Система готова к работе 24/7.")
@@ -53,6 +78,12 @@ async def status_cmd(message: types.Message):
         f"• 🧠 Модель: {MODEL_NAME}\n"
         f"• ⚡ Статус: Активен"
     )
+
+@dp.message(Command("models"))
+async def models_cmd(message: types.Message):
+    """Telegram command that returns the list of available Groq models."""
+    reply = await get_models()
+    await message.answer(reply)
 
 @dp.message()
 async def handle_message(message: types.Message):
@@ -75,12 +106,3 @@ async def lifespan(app: FastAPI):
             await polling_task
         except asyncio.CancelledError:
             pass
-    if bot:
-        await bot.session.close()
-
-app = FastAPI(lifespan=lifespan)
-
-@app.get("/")
-@app.get("/health")
-async def health():
-    return {"status": "ok", "service": "matin_forge_cloud"}
