@@ -35,7 +35,37 @@ async def generate_plan(prompt: str) -> str:
         response = await client.post(GROQ_ENDPOINT, headers=headers, json=payload)
         response.raise_for_status()
         data = response.json()
-        # Groq follows OpenAI schema
+        choices = data.get("choices", [])
+        if not choices:
+            raise RuntimeError("No choices returned from Groq API")
+        return choices[0]["message"]["content"].strip()
+
+# ---------- General chat completion helper (AI assistant) ----------
+async def ask_groq(prompt: str) -> str:
+    """Send a user prompt to the configured Groq model and return the assistant's reply.
+
+    This uses the same endpoint as ``generate_plan`` but with a more generic system prompt.
+    """
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY is not set in environment")
+
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": "You are a helpful AI assistant that answers user queries concisely and accurately."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.7,
+        "max_tokens": 1024,
+    }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(GROQ_ENDPOINT, headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
         choices = data.get("choices", [])
         if not choices:
             raise RuntimeError("No choices returned from Groq API")
