@@ -1,20 +1,22 @@
 import os
 import asyncio
 from contextlib import asynccontextmanager
-
 import httpx
 from fastapi import FastAPI
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 
+# Environment variables
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GROQ_KEY = os.getenv("GROQ_API_KEY")
 MODEL_NAME = "llama-3.1-8b-instant"
 
+# Initialise bot and dispatcher
 bot = Bot(token=TOKEN) if TOKEN else None
 dp = Dispatcher()
 
 async def call_groq(prompt: str) -> str:
+    """Send a prompt to Groq and return the assistant's reply."""
     if not GROQ_KEY:
         return "⚠️ GROQ_API_KEY не задан в переменных Render!"
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -57,8 +59,8 @@ async def handle_message(message: types.Message):
     if not message.text:
         return
     status_msg = await message.answer("⏳ Генерирую ответ...")
-    reply_text = await call_groq(message.text)
-    await status_msg.edit_text(reply_text)
+    reply = await call_groq(message.text)
+    await status_msg.edit_text(reply)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
